@@ -11,6 +11,7 @@ Menggunakan browser automation (Firefox headless) untuk mengambil data tracking 
 - **Stealth mode** — menyamarkan fingerprint bot agar tidak terdeteksi reCAPTCHA
 - **Multi-selector fallback** — mendeteksi input field secara otomatis
 - **Debug mode** — simpan screenshot & HTML untuk troubleshooting
+- **API Key security** — endpoint dilindungi dengan X-API-Key header
 - **Konfigurasi via `.env`** — mudah diaktifkan/dinonaktifkan tanpa edit kode
 - **Docker support** — jalankan di container dengan mudah
 
@@ -46,6 +47,10 @@ DEBUG=false
 # Browser Headless Mode
 # true = tanpa tampilan browser, false = tampilkan browser
 HEADLESS=true
+
+# API Key untuk mengamankan endpoint
+# Kosongkan untuk open access (tidak disarankan)
+API_KEY=your-secret-key-here
 ```
 
 ### Semua konfigurasi (via `config.py`)
@@ -54,6 +59,7 @@ HEADLESS=true
 | ---------- | --------- | ------------------------------- |
 | `DEBUG`    | `false`   | Aktifkan screenshot & HTML dump |
 | `HEADLESS` | `true`    | Mode headless browser           |
+| `API_KEY`  | `""`      | API Key untuk autentikasi       |
 | `HOST`     | `0.0.0.0` | Server host                     |
 | `PORT`     | `8001`    | Server port                     |
 
@@ -140,6 +146,12 @@ docker-compose down
 GET /api/track?resi={nomor_resi}
 ```
 
+**Headers:**
+
+| Header      | Required | Description         |
+| ----------- | -------- | ------------------- |
+| `X-API-Key` | ✅       | API Key dari `.env` |
+
 **Parameter:**
 
 | Param  | Type     | Required | Description                                    |
@@ -148,8 +160,9 @@ GET /api/track?resi={nomor_resi}
 
 **Contoh request:**
 
-```
-GET http://localhost:8001/api/track?resi=660108012346,660108011392
+```bash
+curl -H "X-API-Key: your-secret-key-here" \
+  "http://localhost:8001/api/track?resi=660108012346,660108011392"
 ```
 
 **Response sukses (200):**
@@ -170,6 +183,17 @@ GET http://localhost:8001/api/track?resi=660108012346,660108011392
   "status": "404",
   "response": {
     "message": "Data tracking tidak ditemukan atau reCAPTCHA memblokir bot."
+  }
+}
+```
+
+**Response error (401):**
+
+```json
+{
+  "status": "401",
+  "response": {
+    "message": "API Key tidak valid atau tidak diberikan."
   }
 }
 ```
@@ -223,6 +247,7 @@ debug/
 - Menggunakan **Firefox** karena lebih sulit dideteksi sebagai bot dibanding Chromium
 - `playwright-stealth` memodifikasi fingerprint browser agar terlihat seperti user biasa
 - reCAPTCHA mungkin masih memblokir jika terdeteksi behavioral analysis
+- Jika `API_KEY` kosong di `.env`, endpoint bisa diakses tanpa autentikasi
 - Untuk penggunaan production, pertimbangkan rate limiting dan caching
 
 ---

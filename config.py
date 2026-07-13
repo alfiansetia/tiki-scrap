@@ -18,6 +18,9 @@ class BaseSettings:
     # Browser
     HEADLESS: bool = _to_bool(os.getenv("HEADLESS", "true"))
 
+    # Security
+    API_KEY: str = os.getenv("API_KEY", "")
+
     # Server
     HOST: str = os.getenv("HOST", "0.0.0.0")
     PORT: int = int(os.getenv("PORT", "8001"))

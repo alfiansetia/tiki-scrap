@@ -3,7 +3,8 @@ import json
 import logging
 import os
 from datetime import datetime
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, Depends, HTTPException, Query, Security
+from fastapi.security import APIKeyHeader
 from fastapi.responses import JSONResponse
 from playwright.async_api import async_playwright
 from playwright_stealth import Stealth
@@ -23,6 +24,18 @@ app = FastAPI(
 )
 
 
+api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
+
+async def verify_api_key(api_key: str = Security(api_key_header)):
+    if not settings.API_KEY:
+        # Jika API_KEY tidak diset di .env, skip validasi
+        return
+    if not api_key or api_key != settings.API_KEY:
+        raise HTTPException(
+            status_code=401,
+            detail={"status": "401", "response": {"message": "API Key tidak valid atau tidak diberikan."}}
+        )
+
 def buat_network_listener(status_container):
     async def handle_response(response):
         # Memastikan mendengarkan endpoint tracking yang tepat
@@ -39,7 +52,7 @@ def buat_network_listener(status_container):
     return handle_response
 
 
-@app.get("/api/track")
+@app.get("/api/track", dependencies=[Depends(verify_api_key)])
 async def track_resi(resi: str = Query(..., description="Nomor resi TIKI yang ingin dicari")):
     logging.info(f"Menerima request tracking untuk resi: {resi}")
     status_container = {"hasil": None}
