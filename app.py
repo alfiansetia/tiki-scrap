@@ -58,7 +58,7 @@ async def track_resi(resi: str = Query(..., description="Nomor resi TIKI yang in
     status_container = {"hasil": None}
 
     async with async_playwright() as p:
-        # Gunakan Firefox — lebih sulit dideteksi bot daripada Chromium
+        # Gunakan Firefox — TIKI mendeteksi Chromium sebagai bot
         browser = await p.firefox.launch(headless=settings.HEADLESS)
 
         # Buat browser context baru untuk isolasi session/cookies
@@ -79,10 +79,11 @@ async def track_resi(resi: str = Query(..., description="Nomor resi TIKI yang in
 
         try:
             logging.info(f"[{resi}] Membuka website TIKI...")
+            # 'domcontentloaded' lebih cepat karena tidak tunggu semua gambar/iframe selesai
             await page.goto(settings.TIKI_TRACK_URL, timeout=settings.PAGE_TIMEOUT, wait_until="domcontentloaded")
 
-            # Tunggu halaman benar-benar selesai render (tunggu JS framework)
-            await page.wait_for_timeout(settings.RENDER_WAIT)
+            # Tunggu render framework (2000ms — kompromi cepat tapi cukup untuk JS framework)
+            await page.wait_for_timeout(2000)
 
             # Debug: simpan screenshot & HTML hanya jika DEBUG aktif
             screenshot_path = None
@@ -130,11 +131,12 @@ async def track_resi(resi: str = Query(..., description="Nomor resi TIKI yang in
             await page.click('.tracking-btn-lacak')
 
             # Polling network untuk menunggu reCAPTCHA beres & data dikirim kembali
+            # Lebih responsif dengan interval 100ms dibanding 1 detik
             timeout_detik = settings.POLLING_TIMEOUT
-            for _ in range(timeout_detik):
+            for _ in range(timeout_detik * 10):
                 if status_container["hasil"] is not None:
                     break
-                await asyncio.sleep(1)
+                await asyncio.sleep(0.1)
 
             if status_container["hasil"]:
                 logging.info(f"[{resi}] Sukses mendapatkan data tracking.")
@@ -157,8 +159,6 @@ async def track_resi(resi: str = Query(..., description="Nomor resi TIKI yang in
             )
 
         finally:
-            # Beri jeda 2 detik agar Anda sempat melihat apa yang terjadi di browser sebelum menutup otomatis
-            await page.wait_for_timeout(2000)
             await browser.close()
 
 
