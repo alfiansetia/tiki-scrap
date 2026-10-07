@@ -8,6 +8,7 @@ from fastapi.security import APIKeyHeader
 from fastapi.responses import JSONResponse
 from playwright.async_api import async_playwright
 from playwright_stealth import Stealth
+from cekresi import CekresiClient
 from config import settings
 import sys
 
@@ -92,6 +93,30 @@ def buat_network_listener(status_container):
 @app.get("/health")
 async def health():
     return {"status": "200", "response": {"message": "OK"}}
+
+
+@app.get("/api/track-cekresi", dependencies=[Depends(verify_api_key)])
+async def track_cekresi(
+    resi: str = Query(..., description="Nomor resi yang ingin dicari"),
+    kurir: str = Query("TIKI", description="Kode ekspedisi (mis. TIKI, JNE, JET)"),
+):
+    """Versi alternatif via cekresi.com — tanpa browser & tanpa reCAPTCHA (pure HTTP)."""
+    logging.info(f"[cekresi:{kurir}] Request tracking untuk resi: {resi}")
+    try:
+        hasil = await asyncio.to_thread(CekresiClient().track, resi, kurir)
+    except Exception as e:
+        logging.error(f"[cekresi:{kurir}] Error: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"status": "500", "response": {"message": f"Internal Server Error: {e}"}},
+        )
+    if hasil.get("ok"):
+        hasil.pop("ok")
+        return JSONResponse(status_code=200, content={"status": "200", "response": hasil})
+    return JSONResponse(
+        status_code=404,
+        content={"status": "404", "response": {"message": hasil.get("error", "Data tidak ditemukan.")}},
+    )
 
 
 @app.get("/api/track", dependencies=[Depends(verify_api_key)])
