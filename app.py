@@ -8,7 +8,7 @@ from fastapi.security import APIKeyHeader
 from fastapi.responses import JSONResponse
 from playwright.async_api import async_playwright
 from playwright_stealth import Stealth
-from cekresi import CekresiClient
+from cekresi import CekresiClient, to_legacy
 from config import settings
 import sys
 
@@ -97,25 +97,49 @@ async def health():
 
 @app.get("/api/track-cekresi", dependencies=[Depends(verify_api_key)])
 async def track_cekresi(
-    resi: str = Query(..., description="Nomor resi yang ingin dicari"),
+    resi: str = Query(..., description="Nomor resi (bisa multiple, pisahkan koma)"),
     kurir: str = Query("TIKI", description="Kode ekspedisi (mis. TIKI, JNE, JET)"),
 ):
-    """Versi alternatif via cekresi.com — tanpa browser & tanpa reCAPTCHA (pure HTTP)."""
-    logging.info(f"[cekresi:{kurir}] Request tracking untuk resi: {resi}")
+    """Versi alternatif via cekresi.com — tanpa browser & tanpa reCAPTCHA (pure HTTP),
+    response disamakan dengan format tiki.id: {status, msg, response[...]}."""
+    daftar = [r.strip().upper().replace(" ", "") for r in resi.split(",") if r.strip()]
+    daftar = list(dict.fromkeys(daftar))  # buang duplikat, pertahankan urutan
+    if not daftar:
+        return JSONResponse(
+            status_code=404,
+            content={"status": "404", "response": {"message": "Nomor resi kosong."}},
+        )
+    if len(daftar) > 20:
+        return JSONResponse(
+            status_code=400,
+            content={"status": "400", "response": {"message": "Maksimal 20 resi per request."}},
+        )
+    logging.info(f"[cekresi:{kurir}] Request tracking untuk {len(daftar)} resi.")
     try:
-        hasil = await asyncio.to_thread(CekresiClient().track, resi, kurir)
+        # Satu session/client per resi (urllib opener tidak thread-safe),
+        # dijalankan konkuren agar multiresi tetap cepat.
+        mentah = await asyncio.gather(
+            *[asyncio.to_thread(CekresiClient().track, r, kurir) for r in daftar]
+        )
     except Exception as e:
         logging.error(f"[cekresi:{kurir}] Error: {e}")
         return JSONResponse(
             status_code=500,
             content={"status": "500", "response": {"message": f"Internal Server Error: {e}"}},
         )
-    if hasil.get("ok"):
-        hasil.pop("ok")
-        return JSONResponse(status_code=200, content={"status": "200", "response": hasil})
+    data = [to_legacy(item) for item in mentah if item.get("ok")]
+    if not data:
+        return JSONResponse(
+            status_code=404,
+            content={"status": "404", "response": {"message": "Semua resi tidak ditemukan."}},
+        )
     return JSONResponse(
-        status_code=404,
-        content={"status": "404", "response": {"message": hasil.get("error", "Data tidak ditemukan.")}},
+        status_code=200,
+        content={
+            "status": 200,
+            "msg": "single" if len(data) == 1 else "multiple",
+            "response": data,
+        },
     )
 
 

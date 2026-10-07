@@ -15,6 +15,7 @@ import re
 import string
 import urllib.parse
 import urllib.request
+from datetime import datetime
 
 from Crypto.Cipher import AES
 from Crypto.Util.Padding import pad
@@ -97,12 +98,13 @@ class CekresiClient:
             return {"ok": False, "error": "Resi tidak ditemukan / ditolak server cekresi."}
 
         m_status = re.search(r"status <strong>(.*?)</strong>", html)
-        m_dari = re.search(r"no resi <strong>.*?</strong>\s*dari (.*?)<br", html, re.S)
+        m_dari = re.search(r"dari (.*?)<br\s*/>(.*?)status", html, re.S)
         m_penerima = re.search(
             r'id="last_position">\s*(.*?)\s*</div>', html, re.S
         )
         status = m_status.group(1).strip() if m_status else "-"
-        pengirim = re.sub(r"<.*?>", "", m_dari.group(1)).strip() if m_dari else "-"
+        pengirim = re.sub(r"<.*?>", "", m_dari.group(1)).strip() if m_dari else ""
+        pengirim_kota = re.sub(r"<.*?>", "", m_dari.group(2)).strip() if m_dari else ""
         penerima = (
             re.sub(r"\s+", " ", m_penerima.group(1)).strip() if m_penerima else "-"
         )
@@ -126,9 +128,8 @@ class CekresiClient:
                     }
                 )
 
-        if not history and status == "-":
-            logging.warning("Parse cekresi kosong untuk %s", resi)
-            return {"ok": False, "error": "Gagal parse response cekresi."}
+        if not history:
+            return {"ok": False, "error": "Resi tidak ditemukan (tidak ada history)."}
 
         return {
             "ok": True,
@@ -136,6 +137,86 @@ class CekresiClient:
             "kurir": kurir,
             "status": status,
             "pengirim": pengirim,
+            "pengirim_kota": pengirim_kota,
             "penerima": penerima,
             "history": history,
         }
+
+
+def _to_legacy_date(tgl: str) -> str:
+    """'06 Oct 2026 07:56:31' -> '2026-10-06 07:56:31' (format tiki.id)."""
+    try:
+        return datetime.strptime(tgl, "%d %b %Y %H:%M:%S").strftime("%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        return tgl
+
+
+def _infer_status_code(noted: str) -> str:
+    """Kode status tiki (POD/DEL/DEX/...) tidak disediakan cekresi,
+    jadi ditebak dari teks noted agar konsumen lama (progress bar) tetap jalan."""
+    t = noted.upper()
+    if "RECEIVED BY" in t or "DELIVERED" in t or t.startswith("SUCCESS"):
+        return "POD 01"
+    if "WITH DELIVERY COURIER" in t:
+        return "DEL 01"
+    if "DEX" in t or "FAILED" in t or "GAGAL" in t or "DITAHAN" in t:
+        return "DEX"
+    if "ARRIVED" in t:
+        return "INC 01"
+    if "DEPARTED" in t:
+        return "ROS"
+    if "PICKED" in t or "PICK UP" in t or "PICKUP" in t:
+        return "PUP 05"
+    if "DATA ENTRY" in t:
+        return "MDE 01"
+    return ""
+
+
+def _split_place(lokasi: str) -> str:
+    m = re.search(r"\[(.*?)\]", lokasi)
+    return m.group(1).strip() if m else lokasi
+
+
+def to_legacy(item: dict) -> dict:
+    """Ubah hasil track() menjadi struktur response tiki.id
+    {cnno, seq_no, ..., history[{seq_no, entry_date, status, entry_name, entry_place, noted}], image_pod}.
+    Field yang tidak disediakan cekresi diisi default kosong/nol."""
+    history = [
+        {
+            "seq_no": 0,
+            "entry_date": _to_legacy_date(h["tanggal"]),
+            "status": _infer_status_code(h["status"]),
+            "entry_name": h["lokasi"],
+            "entry_place": _split_place(h["lokasi"]),
+            "noted": h["status"],
+        }
+        for h in item.get("history", [])
+    ]
+    consignee = ""
+    for h in history:
+        m = re.search(r"RECEIVED BY\s*:?\s*(.*?)(?:\s+-|$)", h["noted"], re.I)
+        if m:
+            consignee = m.group(1).strip()
+            break
+    return {
+        "cnno": item.get("resi", ""),
+        "seq_no": 0,
+        "sender_reference": "",
+        "origin_tariff": "",
+        "destination_tariff_code": "",
+        "destination_city_name": "",
+        "product": "",
+        "sys_created_on": history[-1]["entry_date"] if history else "",
+        "consignor_name": item.get("pengirim", ""),
+        "consignor_address": item.get("pengirim_kota", ""),
+        "consignee_name": consignee,
+        "consignee_address": "",
+        "weight": 0,
+        "insurance_fee": 0,
+        "shipment_fee": 0,
+        "pieces_no": 0,
+        "est_day": "",
+        "est_date": "",
+        "history": history,
+        "image_pod": None,
+    }
