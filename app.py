@@ -5,7 +5,7 @@ import os
 from datetime import datetime
 from fastapi import FastAPI, Depends, HTTPException, Query, Security
 from fastapi.security import APIKeyHeader
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, HTMLResponse
 from playwright.async_api import async_playwright
 from playwright_stealth import Stealth
 from cekresi import CekresiClient, to_legacy
@@ -95,6 +95,12 @@ async def health():
     return {"status": "200", "response": {"message": "OK"}}
 
 
+@app.get("/cekresi", response_class=HTMLResponse)
+async def halaman_cekresi():
+    with open(os.path.join(os.path.dirname(__file__), "static", "cekresi.html"), encoding="utf-8") as f:
+        return f.read()
+
+
 @app.get("/api/track-cekresi", dependencies=[Depends(verify_api_key)])
 async def track_cekresi(
     resi: str = Query(..., description="Nomor resi (bisa multiple, pisahkan koma)"),
@@ -140,6 +146,47 @@ async def track_cekresi(
             "msg": "single" if len(data) == 1 else "multiple",
             "response": data,
         },
+    )
+
+
+@app.get("/api/track-cekresi/expedisi", dependencies=[Depends(verify_api_key)])
+async def daftar_ekspedisi(
+    resi: str = Query(..., description="Nomor resi (bisa multiple, pisahkan koma)"),
+):
+    """Langkah 1 alur cekresi: auto-detect daftar ekspedisi yang tersedia."""
+    daftar = [r.strip().upper().replace(" ", "") for r in resi.split(",") if r.strip()]
+    daftar = list(dict.fromkeys(daftar))
+    if not daftar:
+        return JSONResponse(
+            status_code=404,
+            content={"status": "404", "response": {"message": "Nomor resi kosong."}},
+        )
+    try:
+        mentah = await asyncio.gather(
+            *[asyncio.to_thread(CekresiClient().detect, r) for r in daftar]
+        )
+    except Exception as e:
+        return JSONResponse(
+            status_code=500,
+            content={"status": "500", "response": {"message": f"Internal Server Error: {e}"}},
+        )
+    gabung, per_resi = [], {}
+    for r, item in zip(daftar, mentah):
+        if not item.get("ok"):
+            per_resi[r] = {"error": item.get("error", "Tidak dikenali.")}
+            continue
+        per_resi[r] = {"ekspedisi": [e["kode"] for e in item["ekspedisi"]]}
+        for e in item["ekspedisi"]:
+            if e["kode"] not in [g["kode"] for g in gabung]:
+                gabung.append(e)
+    if not gabung:
+        return JSONResponse(
+            status_code=404,
+            content={"status": "404", "response": {"message": "Resi tidak dikenali."}},
+        )
+    return JSONResponse(
+        status_code=200,
+        content={"status": 200, "msg": "single" if len(daftar) == 1 else "multiple", "response": gabung},
     )
 
 

@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cek Resi</title>
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif; margin: 0; background: #f2f4f7; color: #333; }
+  .wrap { max-width: 860px; margin: 0 auto; padding: 24px 16px 60px; }
+  h1 { text-align: center; font-size: 24px; margin: 8px 0 20px; }
+  .card { background: #fff; border-radius: 10px; padding: 16px; margin-bottom: 16px; box-shadow: 0 1px 4px rgba(0,0,0,.08); }
+  label { display: block; font-size: 13px; margin: 10px 0 4px; color: #555; }
+  input[type=text], input[type=password] { width: 100%; padding: 10px; font-size: 15px; border: 1px solid #ccc; border-radius: 6px; }
+  button.go { width: 100%; margin-top: 14px; padding: 12px; font-size: 16px; background: #114dbb; color: #fff; border: 0; border-radius: 6px; cursor: pointer; }
+  button.go:disabled { background: #8aa4d8; cursor: wait; }
+  .expgrid { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+  .expgrid button { padding: 9px 14px; font-size: 14px; border: 1px solid #114dbb; background: #fff; color: #114dbb; border-radius: 6px; cursor: pointer; }
+  .expgrid button:hover, .expgrid button.active { background: #114dbb; color: #fff; }
+  .expgrid button:disabled { opacity: .6; cursor: wait; }
+  .err { background: #fdecea; color: #b71c1c; border-radius: 6px; padding: 10px 12px; margin-bottom: 16px; }
+  .head { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 6px; background: #eef1f5; border-radius: 6px; padding: 10px 12px; margin-bottom: 10px; font-weight: 600; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  td, th { border: 1px solid #e3e6ea; padding: 8px; text-align: left; vertical-align: top; }
+  th { background: #f7f8fa; }
+  .progress { height: 8px; background: #e6e8ec; border-radius: 4px; overflow: hidden; margin: 10px 0 14px; }
+  .progress > div { height: 100%; background: #114dbb; }
+  .muted { color: #777; font-size: 13px; }
+  details { margin-top: 6px; }
+  summary { cursor: pointer; color: #114dbb; font-size: 14px; }
+  .step { font-size: 13px; color: #114dbb; font-weight: 700; margin-bottom: 6px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Cek Resi</h1>
+
+  <div class="card">
+    <div class="step">Langkah 1 — Masukkan resi</div>
+    <input type="text" id="resi" placeholder="cth: 660111042408, 660108012346" autocomplete="off">
+    <label for="apikey">API Key (disimpan di browser ini saja)</label>
+    <input type="password" id="apikey" placeholder="X-API-Key (kosongkan bila open access)" autocomplete="off">
+    <button class="go" id="btnCek">Cek Ekspedisi</button>
+  </div>
+
+  <div class="card" id="expCard" style="display:none">
+    <div class="step">Langkah 2 — Pilih ekspedisi yang tersedia</div>
+    <div class="expgrid" id="expGrid"></div>
+  </div>
+
+  <div id="out"></div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+$('apikey').value = localStorage.getItem('cekresi_apikey') || '';
+let lastResi = '';
+
+function headers() {
+  const h = {};
+  const key = $('apikey').value.trim();
+  localStorage.setItem('cekresi_apikey', key);
+  if (key) h['X-API-Key'] = key;
+  return h;
+}
+function progressOf(code) {
+  code = code || '';
+  if (code.includes('MDE')) return 0;
+  if (code.includes('DEL') || code.includes('DEX')) return 66;
+  if (code.includes('POD')) return 100;
+  return 34;
+}
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+}
+
+function renderItem(el) {
+  const h0 = (el.history && el.history[0]) || {};
+  const lastStat = h0.noted ? esc(h0.noted) + ' | ' + esc(h0.entry_date || '') : '-';
+  const rows = (el.history || []).map(h => `<tr><td>${esc(h.entry_date)}</td><td>${esc(h.entry_name)}<br>${esc(h.noted)}</td></tr>`).join('');
+  return `<div class="card">
+    <div class="head"><span>${esc(el.cnno)}</span><span>${lastStat}</span></div>
+    <table>
+      <tr><td width="50%">Pengirim:<br><b>${esc(el.consignor_name)}<br>${esc(el.consignor_address)}</b></td>
+      <td>Penerima:<br><b>${esc(el.consignee_name)}<br>${esc(el.consignee_address)}</b></td></tr>
+      <tr><td>Dikirim: <b>${esc(el.sys_created_on)}</b></td><td>Estimasi: <b>${esc(el.est_date) || '-'}</b></td></tr>
+    </table>
+    <div class="progress"><div style="width:${progressOf(h0.status)}%"></div></div>
+    <details open><summary>Riwayat perjalanan (${(el.history || []).length})</summary>
+      <table style="margin-top:8px"><tr><th width="180">Tanggal</th><th>Status</th></tr>${rows}</table>
+    </details>
+  </div>`;
+}
+
+$('btnCek').addEventListener('click', async () => {
+  const resi = $('resi').value.trim();
+  const out = $('out'), expCard = $('expCard'), grid = $('expGrid');
+  if (!resi) { out.innerHTML = '<div class="err">Isi nomor resi dulu.</div>'; return; }
+  lastResi = resi;
+  const btn = $('btnCek');
+  btn.disabled = true; btn.textContent = 'Mengecek...';
+  out.innerHTML = ''; expCard.style.display = 'none'; grid.innerHTML = '';
+  try {
+    const r = await fetch('/api/track-cekresi/expedisi?resi=' + encodeURIComponent(resi), { headers: headers() });
+    const data = await r.json();
+    if (!r.ok) {
+      out.innerHTML = '<div class="err">' + esc((data.response && data.response.message) || ('HTTP ' + r.status)) + '</div>';
+      return;
+    }
+    grid.innerHTML = data.response.map(e =>
+      `<button data-kode="${esc(e.kode)}">${esc(e.nama)}</button>`).join('');
+    grid.querySelectorAll('button').forEach(b => b.addEventListener('click', () => lacak(b)));
+    expCard.style.display = 'block';
+    expCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  } catch (e) {
+    out.innerHTML = '<div class="err">Gagal: ' + esc(e.message) + '</div>';
+  } finally {
+    btn.disabled = false; btn.textContent = 'Cek Ekspedisi';
+  }
+});
+
+async function lacak(btn) {
+  const kode = btn.dataset.kode;
+  const out = $('out');
+  document.querySelectorAll('#expGrid button').forEach(b => { b.disabled = true; b.classList.remove('active'); });
+  btn.classList.add('active');
+  out.innerHTML = '<div class="card muted">Melacak via ' + esc(kode) + ', tunggu sebentar...</div>';
+  try {
+    const url = '/api/track-cekresi?resi=' + encodeURIComponent(lastResi) + '&kurir=' + encodeURIComponent(kode);
+    const r = await fetch(url, { headers: headers() });
+    const data = await r.json();
+    if (!r.ok) {
+      out.innerHTML = '<div class="err">' + esc((data.response && data.response.message) || ('HTTP ' + r.status)) + '</div>';
+      return;
+    }
+    out.innerHTML = '<div class="muted" style="margin-bottom:10px">Ditemukan ' + data.response.length + ' resi via ' + esc(kode) + ' (' + esc(data.msg) + ')</div>'
+      + data.response.map(renderItem).join('');
+    out.scrollIntoView({ behavior: 'smooth' });
+  } catch (e) {
+    out.innerHTML = '<div class="err">Gagal: ' + esc(e.message) + '</div>';
+  } finally {
+    document.querySelectorAll('#expGrid button').forEach(b => b.disabled = false);
+  }
+}
+$('resi').addEventListener('keydown', e => { if (e.key === 'Enter') $('btnCek').click(); });
+</script>
+</body>
+</html>

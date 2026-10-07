@@ -9,6 +9,8 @@ Alur yang ditiru dari JS homepage cekresi.com:
 """
 
 import base64
+import html as htmlmod
+import json
 import logging
 import random
 import re
@@ -52,7 +54,9 @@ class CekresiClient:
             headers={
                 "X-Requested-With": "XMLHttpRequest",
                 "Referer": "https://cekresi.com/",
+                "Origin": "https://cekresi.com",
                 "Accept": "*/*",
+                "Accept-Language": "id,en-US;q=0.7,en;q=0.3",
             },
         )
         with self.opener.open(req, timeout=TIMEOUT) as r:
@@ -72,6 +76,28 @@ class CekresiClient:
         )
         with self.opener.open(req, timeout=TIMEOUT) as r:
             return r.read().decode("utf-8", errors="replace")
+
+    def detect(self, resi: str) -> dict:
+        """Langkah 1 alur cekresi: auto-detect daftar ekspedisi utk satu resi.
+        Return {"ok": True, "resi": ..., "ekspedisi": [{"kode":..., "nama":...}]}."""
+        resi = resi.strip().upper().replace(" ", "")
+        self._get("https://cekresi.com/")  # cookie session
+        raw = self._get(
+            f"https://content.cekresi.com/resi/initialize_exp.php"
+            f"?r={urllib.parse.quote(resi)}&p=1&w={_rand_w()}"
+        )
+        try:
+            data = json.loads(raw)
+            content = data.get("content", "")
+        except (ValueError, AttributeError):
+            return {"ok": False, "error": "Resi tidak dikenali (tidak ada ekspedisi)."}
+        lihat = []
+        for kode, nama in re.findall(r"setExp\('([^']+)'\)[^>]*>([^<]+)<", content):
+            if kode not in [e["kode"] for e in lihat]:
+                lihat.append({"kode": kode, "nama": htmlmod.unescape(nama).strip()})
+        if not lihat:
+            return {"ok": False, "error": "Resi tidak dikenali (tidak ada ekspedisi)."}
+        return {"ok": True, "resi": resi, "ekspedisi": lihat}
 
     def track(self, resi: str, kurir: str = "TIKI") -> dict:
         resi = resi.strip().upper().replace(" ", "")
