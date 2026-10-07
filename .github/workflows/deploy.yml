@@ -1,4 +1,4 @@
-# Auto-deploy ke server via SSH setiap push ke branch `main`.
+# Auto-deploy ke server via SSH setiap push ke branch `master`.
 #
 # Secrets yang wajib diisi di GitHub (Settings → Secrets → Actions):
 #   SSH_HOST     - IP / domain server
@@ -15,7 +15,7 @@ name: Deploy
 
 on:
   push:
-    branches: [main]
+    branches: [master]
 
 jobs:
   deploy:
@@ -36,8 +36,8 @@ jobs:
             cd ${{ secrets.PROJECT_PATH }}
 
             echo "==> Pull kode terbaru"
-            git fetch origin main
-            git reset --hard origin/main
+            git fetch origin master
+            git reset --hard origin/master
 
             echo "==> Rebuild & restart container"
             docker compose up -d --build
