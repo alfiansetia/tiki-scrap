@@ -16,7 +16,6 @@ name: Deploy
 on:
   push:
     branches: [main]
-  workflow_dispatch: # tombol manual "Run workflow" di tab Actions
 
 jobs:
   deploy:
