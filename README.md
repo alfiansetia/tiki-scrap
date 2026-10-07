@@ -61,7 +61,7 @@ API_KEY=your-secret-key-here
 | `HEADLESS` | `true`    | Mode headless browser           |
 | `API_KEY`  | `""`      | API Key untuk autentikasi       |
 | `HOST`     | `0.0.0.0` | Server host                     |
-| `PORT`     | `8001`    | Server port                     |
+| `PORT`     | `8000`    | Server port                     |
 
 ---
 
@@ -112,7 +112,7 @@ playwright install firefox
 python app.py
 ```
 
-Server berjalan di `http://localhost:8001`
+Server berjalan di `http://localhost:8000`
 
 ---
 
@@ -162,7 +162,7 @@ GET /api/track?resi={nomor_resi}
 
 ```bash
 curl -H "X-API-Key: your-secret-key-here" \
-  "http://localhost:8001/api/track?resi=660108012346,660108011392"
+  "http://localhost:8000/api/track?resi=660108012346,660108011392"
 ```
 
 **Response sukses (200):**
@@ -211,7 +211,7 @@ curl -H "X-API-Key: your-secret-key-here" \
 
 ### Swagger UI
 
-Buka di browser: `http://localhost:8001/docs`
+Buka di browser: `http://localhost:8000/docs`
 
 ---
 

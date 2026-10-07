@@ -1,7 +1,9 @@
 .venv
 .git
+.github
 .gitignore
 __pycache__
 *.pyc
 debug/
+.env
 .env.example

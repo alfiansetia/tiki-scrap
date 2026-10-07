@@ -36,10 +36,47 @@ async def verify_api_key(api_key: str = Security(api_key_header)):
             detail={"status": "401", "response": {"message": "API Key tidak valid atau tidak diberikan."}}
         )
 
+async def klik_checkbox_recaptcha(page, resi: str, timeout_detik: int = 25) -> str:
+    """Klik checkbox reCAPTCHA v2 dan tunggu token muncul. Return token atau '' jika gagal."""
+    try:
+        # Pastikan widget sudah dirender oleh grecaptcha.render()
+        await page.wait_for_selector(".recaptcha-box", timeout=15000)
+        await page.eval_on_selector(".recaptcha-widget", "e => e.scrollIntoView({block: 'center'})")
+        await page.wait_for_timeout(1500)
+
+        anchor_iframe = "iframe[src*='recaptcha/api2/anchor']"
+        await page.wait_for_selector(anchor_iframe, timeout=15000)
+
+        checkbox = page.frame_locator(anchor_iframe).locator("#recaptcha-anchor")
+        await checkbox.wait_for(state="visible", timeout=10000)
+        logging.info(f"[{resi}] Mengklik checkbox reCAPTCHA...")
+        await checkbox.click(timeout=10000)
+    except Exception as e:
+        logging.warning(f"[{resi}] Gagal klik checkbox: {e}")
+        return ""
+
+    # Polling token via helper JS bawaan TIKI (getRecaptchaToken)
+    for _ in range(timeout_detik * 2):
+        try:
+            token = await page.evaluate(
+                "() => { try { return getRecaptchaToken(document.querySelector('.tracking-form-input')); }"
+                " catch(e) { return ''; } }"
+            )
+            if token:
+                logging.info(f"[{resi}] Token reCAPTCHA didapat ({len(token)} char).")
+                return token
+        except Exception:
+            pass
+        await asyncio.sleep(0.5)
+
+    logging.warning(f"[{resi}] Token reCAPTCHA tidak muncul (kemungkinan image-challenge).")
+    return ""
+
+
 def buat_network_listener(status_container):
     async def handle_response(response):
-        # Memastikan mendengarkan endpoint tracking yang tepat
-        if "track" in response.url:
+        # Endpoint baru: POST /api/tracking (frontend getTracking)
+        if "/api/tracking" in response.url or "track" in response.url:
             try:
                 content_type = response.headers.get("content-type", "")
                 if "application/json" in content_type:
@@ -50,6 +87,11 @@ def buat_network_listener(status_container):
                 pass
 
     return handle_response
+
+
+@app.get("/health")
+async def health():
+    return {"status": "200", "response": {"message": "OK"}}
 
 
 @app.get("/api/track", dependencies=[Depends(verify_api_key)])
@@ -126,6 +168,27 @@ async def track_resi(resi: str = Query(..., description="Nomor resi TIKI yang in
 
             logging.info(f"[{resi}] Mengisi nomor resi ke selector: {selector_ditemukan}...")
             await page.fill(selector_ditemukan, resi)
+            await page.wait_for_timeout(500)
+
+            # ALUR BARU: wajib centang reCAPTCHA dulu sebelum klik Lacak
+            token = await klik_checkbox_recaptcha(page, resi)
+            if not token:
+                # Cek apakah muncul image-challenge (bframe) untuk pesan error yang jelas
+                challenge = False
+                try:
+                    bframe = await page.query_selector("iframe[src*='recaptcha/api2/bframe']")
+                    challenge = bframe is not None and await bframe.is_visible()
+                except Exception:
+                    pass
+                msg = ("reCAPTCHA image-challenge muncul, auto-klik gagal. "
+                       "Coba HEADLESS=false / IP residential, atau pakai solver berbayar (2Captcha/CapSolver).")
+                if not challenge:
+                    msg = "Gagal mendapatkan token reCAPTCHA (checkbox tidak bisa diklik)."
+                logging.warning(f"[{resi}] {msg}")
+                return JSONResponse(
+                    status_code=428,
+                    content={"status": "428", "response": {"message": msg}}
+                )
 
             logging.info(f"[{resi}] Mengklik tombol lacak...")
             await page.click('.tracking-btn-lacak')

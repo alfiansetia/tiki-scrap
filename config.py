@@ -23,7 +23,7 @@ class BaseSettings:
 
     # Server
     HOST: str = os.getenv("HOST", "0.0.0.0")
-    PORT: int = int(os.getenv("PORT", "8001"))
+    PORT: int = int(os.getenv("PORT", "8000"))
 
     # Tiki URL
     TIKI_TRACK_URL: str = "https://www.tiki.id/id/track"

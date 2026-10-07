@@ -39,7 +39,7 @@ COPY . .
 # Create debug directory
 RUN mkdir -p debug
 
-EXPOSE 8001
+EXPOSE 8000
 
 # PYTHONUNBUFFERED=1 agar log langsung muncul di docker logs
 ENV PYTHONUNBUFFERED=1
